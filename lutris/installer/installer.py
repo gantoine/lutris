@@ -65,6 +65,8 @@ class LutrisInstaller:  # pylint: disable=too-many-instance-attributes
             return SERVICES["gog"]()
         if "itch.io" in version and "itchio" in SERVICES:
             return SERVICES["itchio"]()
+        if "romm" in version and "romm" in SERVICES:
+            return SERVICES["romm"]()
 
     def get_appid(self, installer, initial=None):
         if installer.get("is_dlc"):

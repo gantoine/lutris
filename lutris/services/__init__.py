@@ -11,6 +11,7 @@ from lutris.services.egs import EpicGamesStoreService
 from lutris.services.flathub import FlathubService
 from lutris.services.gog import GOGService
 from lutris.services.humblebundle import HumbleBundleService
+from lutris.services.romm import RommService
 from lutris.services.itchio import ItchIoService
 from lutris.services.lutris import LutrisService
 from lutris.services.mame import MAMEService
@@ -37,6 +38,7 @@ def get_services():
         "ubisoft": UbisoftConnectService,
         "amazon": AmazonService,
         "flathub": FlathubService,
+        "romm": RommService,
     }
     if BNET_ENABLED:
         _services["battlenet"] = BattleNetService
