@@ -9,7 +9,7 @@ from gi.repository import Gtk
 
 from lutris import settings
 from lutris.exceptions import UnavailableGameError
-from lutris.gui.dialogs import HumbleBundleCookiesDialog, QuestionDialog
+from lutris.gui.dialogs import InputDialog
 from lutris.installer import AUTO_ELF_EXE, AUTO_WIN32_EXE
 from lutris.installer.installer_file import InstallerFile
 from lutris.services.base import SERVICE_LOGIN, OnlineService
@@ -39,66 +39,91 @@ class RommBigIcon(RommIcon):
 
 
 class RommGame(ServiceGame):
-    """Service game for DRM free Romm Bundle games"""
+    """Service game for Romm games"""
 
     service = "romm"
 
     @classmethod
-    def new_from_humble_game(cls, humble_game):
+    def new_from_romm(cls, romm_game):
         """Converts a game from the API to a service game usable by Lutris"""
         service_game = RommGame()
-        service_game.appid = humble_game["machine_name"]
-        service_game.slug = humble_game["machine_name"]
-        service_game.name = humble_game["human_name"]
-        service_game.details = json.dumps(humble_game)
+        service_game.appid = romm_game["id"]
+        service_game.slug = romm_game["slug"]
+        service_game.name = romm_game["name"]
+        service_game.details = json.dumps(romm_game)
         return service_game
 
 
 class RommService(OnlineService):
-    """Service for Romm Bundle"""
+    """Service for Romm"""
 
     id = "romm"
-    _matcher = "humble"
-    name = _("Romm Bundle")
+    _matcher = "romm"
+    name = _("Romm")
     icon = "romm"
     online = True
     drm_free = True
+    runner = "libretro"
     medias = {"small_icon": RommSmallIcon, "icon": RommIcon, "big_icon": RommBigIcon}
     default_format = "icon"
 
-    api_url = "https://www.romm.com/"
-    login_url = "https://www.romm.com/login?goto=/home/library"
-    redirect_uri = "https://www.romm.com/home/library"
-
-    cookies_path = os.path.join(settings.CACHE_DIR, ".romm.auth")
-    token_path = os.path.join(settings.CACHE_DIR, ".romm.token")
+    cookies_path = os.path.join(settings.CACHE_DIR, "romm/cookies")
     cache_path = os.path.join(settings.CACHE_DIR, "romm/library/")
+    config_path = os.path.join(settings.CONFIG_DIR, "romm/config.json")
 
-    supported_platforms = ("linux", "windows")
+    def __init__(self):
+        super().__init__()
+
+        # Check the config file for the RomM host
+        if os.path.exists(self.config_path):
+            with open(self.config_path) as config_file:
+                config = json.load(config_file)
+                self.host_url = config["host"]
+                self.redirect_uri = self.host_url + "/"
+
+    @property
+    def login_url(self):
+        """Return the login URL"""
+        return self.host_url + "/login?next=/"
+
+    @property
+    def api_url(self):
+        """Return the API URL"""
+        return self.host_url + "/api"
+
+    def configure(self, parent=None):
+        """Configure the RomM service"""
+        config_dialog = InputDialog({
+            "parent": parent,
+            "title": _("RomM Host"),
+            "question": _("Enter the RomM host URL WITHOUT a trailing slash"),
+            "initial_value": "https://demo.romm.app",
+        })
+
+        result = config_dialog.run()
+        if result != Gtk.ResponseType.OK:
+            config_dialog.destroy()
+            return
+
+        new_host = config_dialog.user_value
+        config_dialog.destroy()
+
+        # Remove the trailing slash if it exists
+        if new_host.endswith("/"):
+            new_host = new_host[:-1]
+        self.host_url = new_host
+
+        # Store the new host in the config file
+        os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
+        with open(self.config_path, "w") as config_file:
+            json.dump({"host": new_host}, config_file)
 
     def login(self, parent=None):
-        dialog = QuestionDialog(
-            {
-                "title": _("Workaround for Romm Bundle authentication"),
-                "question": _(
-                    "Romm Bundle is restricting API calls from software like Lutris and GameHub.\n"
-                    "Authentication to the service will likely fail.\n"
-                    "There is a workaround involving copying cookies "
-                    "from Firefox, do you want to do this instead?"
-                ),
-                "parent": parent,
-            }
-        )
-        if dialog.result == Gtk.ResponseType.YES:
-            dialog = HumbleBundleCookiesDialog()
-            if dialog.cookies_content:
-                with open(self.cookies_path, "w", encoding="utf-8") as cookies_file:
-                    cookies_file.write(dialog.cookies_content)
-                SERVICE_LOGIN.fire(self)
-            else:
-                self.logout()
-        else:
-            return super().login(parent=parent)
+        """Connect to RomM"""
+        if not self.host_url:
+            self.configure(parent)
+
+        super().login(parent)
 
     def login_callback(self, url):
         """Called after the user has logged in successfully"""
@@ -111,21 +136,22 @@ class RommService(OnlineService):
         return self.is_authenticated()
 
     def load(self):
-        """Load the user's Romm Bundle library"""
+        """Load the user's Romm library"""
         try:
             library = self.get_library()
         except ValueError as ex:
-            raise RuntimeError("Failed to get Romm Bundle library. Try logging out and back-in.") from ex
-        humble_games = []
+            raise RuntimeError("Failed to get Romm library. Try logging out and back-in.") from ex
+
+        romm_games = []
         seen = set()
         for game in library:
-            if game["human_name"] in seen:
+            if game["name"] in seen:
                 continue
-            humble_games.append(RommGame.new_from_humble_game(game))
-            seen.add(game["human_name"])
-        for game in humble_games:
+            romm_games.append(RommGame.new_from_romm(game))
+            seen.add(game["name"])
+        for game in romm_games:
             game.save()
-        return humble_games
+        return romm_games
 
     def make_api_request(self, url):
         """Make an authenticated request to the Romm API"""
@@ -137,242 +163,16 @@ class RommService(OnlineService):
             return
         return request.json
 
-    def order_path(self, gamekey):
-        """Return the local path for an order"""
-        return os.path.join(self.cache_path, "%s.json" % gamekey)
-
-    def get_order(self, gamekey):
-        """Retrieve an order identitied by its key"""
-        # logger.debug("Getting Romm Bundle order %s", gamekey)
-        cache_filename = self.order_path(gamekey)
-        if os.path.exists(cache_filename):
-            with open(cache_filename, encoding="utf-8") as cache_file:
-                return json.load(cache_file)
-        response = self.make_api_request(self.api_url + "api/v1/order/%s?all_tpkds=true" % gamekey)
-        os.makedirs(self.cache_path, exist_ok=True)
-        with open(cache_filename, "w", encoding="utf-8") as cache_file:
-            json.dump(response, cache_file)
-        return response
-
     def get_library(self):
         """Return the games from the user's library"""
-        games = []
-        for order in self.get_orders():
-            if not order:
-                continue
-            for product in order["subproducts"]:
-                for download in product["downloads"]:
-                    if download["platform"] in self.supported_platforms:
-                        games.append(product)
-        return games
-
-    def get_gamekeys_from_local_orders(self):
-        """Retrieve a list of orders from the cache."""
-        game_keys = []
-        if os.path.exists(self.cache_path):
-            for order_file in os.listdir(self.cache_path):
-                if not order_file.endswith(".json"):
-                    continue
-                game_keys.append({"gamekey": order_file[:-5]})
-        return game_keys
-
-    def get_orders(self):
-        """Return all orders"""
-        gamekeys = self.get_gamekeys_from_local_orders()
-        orders = []
-        if not gamekeys:
-            gamekeys = self.make_api_request(self.api_url + "api/v1/user/order")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-            future_orders = [executor.submit(self.get_order, gamekey["gamekey"]) for gamekey in gamekeys]
-            for order in future_orders:
-                orders.append(order.result())
-        logger.info("Loaded %s Romm Bundle orders", len(orders))
-        return orders
-
-    @staticmethod
-    def find_download_in_order(order, humbleid, platform):
-        """Return the download information in an order for a give game"""
-        for product in order["subproducts"]:
-            if product["machine_name"] != humbleid:
-                continue
-            available_platforms = [d["platform"] for d in product["downloads"]]
-            if platform not in available_platforms:
-                logger.warning(
-                    "Requested platform %s not available in available platforms: %s", platform, available_platforms
-                )
-
-                if "linux" in available_platforms:
-                    platform = "linux"
-                elif "windows" in available_platforms:
-                    platform = "windows"
-                else:
-                    platform = available_platforms[0]
-            for download in product["downloads"]:
-                if download["platform"] != platform:
-                    continue
-                return {
-                    "product": order["product"],
-                    "gamekey": order["gamekey"],
-                    "created": order["created"],
-                    "download": download,
-                }
-
-    def get_downloads(self, humbleid, platform):
-        """Return the download information for a given game"""
-        download_links = []
-        for order in self.get_orders():
-            download = self.find_download_in_order(order, humbleid, platform)
-            if download:
-                download_links.append(download)
-        return download_links
+        url = f"{self.api_url}/roms?order_by=name&order_dir=asc&limit=250"
+        return self.make_api_request(url)
 
     def get_installer_files(self, installer, installer_file_id, _selected_extras):
-        """Replace the user provided file with download links from Romm Bundle"""
-        try:
-            link = get_humble_download_link(installer.service_appid, installer.runner)
-        except Exception as ex:
-            logger.exception("Failed to get Romm Bundle game: %s", ex)
-            raise UnavailableGameError(_("The download URL for the game could not be determined.")) from ex
-        if not link:
-            raise UnavailableGameError(_("No game found on Romm Bundle"))
-        filename = link.split("?")[0].split("/")[-1]
-        file = InstallerFile(installer.game_slug, installer_file_id, {"url": link, "filename": filename})
-        return [file], []
-
-    @staticmethod
-    def get_filename_for_platform(downloads, platform):
-        download = [d for d in downloads if d["platform"] == platform][0]
-        url = pick_download_url_from_download_info(download)
-        if not url:
-            return
-        return url.split("?")[0].split("/")[-1]
-
-    @staticmethod
-    def platform_has_downloads(downloads, platform):
-        for download in downloads:
-            if download["platform"] != platform:
-                continue
-            if len(download["download_struct"]) > 0:
-                return True
+        pass
 
     def generate_installer(self, db_game):
         details = json.loads(db_game["details"])
-        platforms = [download["platform"] for download in details["downloads"]]
-        system_config = {}
-        if "linux" in platforms and self.platform_has_downloads(details["downloads"], "linux"):
-            runner = "linux"
-            game_config = {"exe": AUTO_ELF_EXE}
-            filename = self.get_filename_for_platform(details["downloads"], "linux")
-            if filename.lower().endswith(".sh"):
-                script = [
-                    {"extract": {"file": "humblegame", "format": "zip", "dst": "$CACHE"}},
-                    {"merge": {"src": "$CACHE/data/noarch", "dst": "$GAMEDIR", "optional": True}},
-                    {"move": {"src": "$CACHE/data/noarch", "dst": "$CACHE/noarch", "optional": True}},
-                    {"merge": {"src": "$CACHE/data/x86_64", "dst": "$GAMEDIR", "optional": True}},
-                    {"move": {"src": "$CACHE/data/x86_64", "dst": "$CACHE/x86_64", "optional": True}},
-                    {"merge": {"src": "$CACHE/data/x86", "dst": "$GAMEDIR", "optional": True}},
-                    {"move": {"src": "$CACHE/data/x86", "dst": "$CACHE/x86", "optional": True}},
-                    {"merge": {"src": "$CACHE/data/", "dst": "$GAMEDIR", "optional": True}},
-                ]
-            elif filename.endswith("-bin") or filename.endswith("mojo.run"):
-                script = [
-                    {"extract": {"file": "humblegame", "format": "zip", "dst": "$CACHE"}},
-                    {"merge": {"src": "$CACHE/data/", "dst": "$GAMEDIR"}},
-                ]
-            elif filename.endswith(".air"):
-                script = [
-                    {"move": {"src": "humblegame", "dst": "$GAMEDIR"}},
-                ]
-            else:
-                script = [{"extract": {"file": "humblegame"}}]
-                system_config = {"gamemode": "false"}  # Unity games crash with gamemode
-        elif "windows" in platforms:
-            runner = "wine"
-            game_config = {"exe": AUTO_WIN32_EXE, "prefix": "$GAMEDIR"}
-            filename = self.get_filename_for_platform(details["downloads"], "windows")
-            if filename.lower().endswith(".zip"):
-                script = [
-                    {"task": {"name": "create_prefix", "prefix": "$GAMEDIR"}},
-                    {"extract": {"file": "humblegame", "dst": "$GAMEDIR/drive_c/%s" % db_game["slug"]}},
-                ]
-            else:
-                script = [{"task": {"name": "wineexec", "executable": "humblegame"}}]
-        else:
-            logger.warning("Unsupported platforms: %s", platforms)
-            return {}
-        return {
-            "name": db_game["name"],
-            "version": "Romm Bundle",
-            "slug": details["machine_name"],
-            "game_slug": self.get_installed_slug(db_game),
-            "runner": runner,
-            "humbleid": db_game["appid"],
-            "script": {
-                "game": game_config,
-                "system": system_config,
-                "files": [{"humblegame": "N/A:Select the installer from Romm Bundle"}],
-                "installer": script,
-            },
-        }
 
     def get_installed_runner_name(self, db_game):
-        details = json.loads(db_game["details"])
-        platforms = [download["platform"] for download in details["downloads"]]
-
-        if "linux" in platforms and self.platform_has_downloads(details["downloads"], "linux"):
-            return "linux"
-
-        if "windows" in platforms:
-            return "wine"
-
-        return ""
-
-
-def pick_download_url_from_download_info(download_info):
-    """From a list of downloads in Romm Bundle, pick the most appropriate one
-    for the installer.
-    This needs a way to be explicitely filtered.
-    """
-    if not download_info["download_struct"]:
-        logger.warning("No downloads found")
-        return
-
-    def humble_sort(download):
-        name = download["name"]
-        if "rpm" in name:
-            return -99  # Not supported as an extractor
-        bonus = 1
-        if "deb" not in name:
-            bonus = 2
-        if linux.LINUX_SYSTEM.is_64_bit:
-            if "386" in name or "32" in name:
-                return -1
-        else:
-            if "64" in name:
-                return -10
-        return 1 * bonus
-
-    sorted_downloads = sorted(download_info["download_struct"], key=humble_sort, reverse=True)
-    logger.debug("Romm bundle installers:")
-    for download in sorted_downloads:
-        logger.debug(download)
-    return sorted_downloads[0]["url"]["web"]
-
-
-def get_humble_download_link(humbleid, runner):
-    """Return a download link for a given humbleid and runner"""
-    service = RommService()
-    platform = runner if runner != "wine" else "windows"
-    downloads = service.get_downloads(humbleid, platform)
-    if not downloads:
-        logger.error("Game %s for %s not found in the Romm Bundle library", humbleid, platform)
-        return
-    logger.info("Found %s download for %s", len(downloads), humbleid)
-    download = downloads[0]
-    logger.info("Reloading order %s", download["product"]["human_name"])
-    os.remove(service.order_path(download["gamekey"]))
-    order = service.get_order(download["gamekey"])
-    download_info = service.find_download_in_order(order, humbleid, platform)
-    if download_info:
-        return pick_download_url_from_download_info(download_info["download"])
-    logger.warning("Couldn't retrieve any downloads for %s", humbleid)
+        return self.runner
