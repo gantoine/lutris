@@ -34,7 +34,7 @@ console_handler.setFormatter(SIMPLE_FORMATTER)
 
 logger = logging.getLogger(__name__)
 logger.addHandler(console_handler)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 
 def get_log_contents():

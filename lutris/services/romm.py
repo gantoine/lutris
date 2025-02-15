@@ -71,6 +71,9 @@ class RommService(OnlineService):
     cache_path = os.path.join(settings.CACHE_DIR, "romm/library/")
     config_path = os.path.join(settings.CONFIG_DIR, "romm/config.json")
 
+    host_url = None
+    redirect_uri = None
+
     def __init__(self):
         super().__init__()
 
@@ -79,12 +82,12 @@ class RommService(OnlineService):
             with open(self.config_path) as config_file:
                 config = json.load(config_file)
                 self.host_url = config["host"]
-                self.redirect_uri = self.host_url + "/"
+                self.redirect_uri = self.host_url + "/scan"
 
     @property
     def login_url(self):
         """Return the login URL"""
-        return self.host_url + "/login?next=/"
+        return self.host_url + "/login?next=/scan"
 
     @property
     def api_url(self):
@@ -111,7 +114,9 @@ class RommService(OnlineService):
         # Remove the trailing slash if it exists
         if new_host.endswith("/"):
             new_host = new_host[:-1]
+
         self.host_url = new_host
+        self.redirect_uri = new_host + "/scan"
 
         # Store the new host in the config file
         os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
@@ -160,13 +165,14 @@ class RommService(OnlineService):
             request.get()
         except HTTPError:
             logger.error("Failed to request %s", url)
-            return
+            return None
+
         return request.json
 
     def get_library(self):
         """Return the games from the user's library"""
         url = f"{self.api_url}/roms?order_by=name&order_dir=asc&limit=250"
-        return self.make_api_request(url)
+        return self.make_api_request(url) or []
 
     def get_installer_files(self, installer, installer_file_id, _selected_extras):
         pass

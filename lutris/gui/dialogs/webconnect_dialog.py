@@ -16,6 +16,7 @@ except ValueError:
 from gi.repository import WebKit2
 
 from lutris.gui.dialogs import ModalDialog
+from lutris.util.log import logger
 
 
 class WebConnectDialog(ModalDialog):
@@ -42,6 +43,8 @@ class WebConnectDialog(ModalDialog):
 
         self.webview = WebKit2.WebView.new_with_context(self.context)
         self.webview.load_uri(service.login_url)
+        logger.debug("Loading %s", service.login_url)
+
         self.webview.connect("load-changed", self.on_navigation)
         self.webview.connect("create", self.on_webview_popup)
         self.webview.connect("decide-policy", self.on_decide_policy)
@@ -79,12 +82,16 @@ class WebConnectDialog(ModalDialog):
         return True
 
     def on_navigation(self, widget, load_event):
+        logger.debug("Load event: %s", load_event)
         if load_event == WebKit2.LoadEvent.FINISHED:
             url = widget.get_uri()
             if url in self.service.scripts:
                 script = self.service.scripts[url]
                 widget.run_javascript(script, None, None)
                 return True
+            logger.debug("Navigated to %s", url)
+            logger.debug("Redirect URI: %s", self.service.redirect_uri)
+            logger.debug("Starts with redirect URI: %s", url.startswith(self.service.redirect_uri))
             if url.startswith(self.service.redirect_uri):
                 if self.service.requires_login_page:
                     resource = widget.get_main_resource()
