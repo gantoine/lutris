@@ -1,9 +1,9 @@
 """Manage RomM libraries"""
 
-import concurrent.futures
 import json
 import os
 from gettext import gettext as _
+from typing import Any, Dict, Optional
 
 from gi.repository import Gtk
 
@@ -20,22 +20,34 @@ from lutris.util.http import HTTPError, Request
 from lutris.util.log import logger
 
 
-class RommIcon(ServiceMedia):
-    """Romm icon"""
+class RommCoverart(ServiceMedia):
+    """Romm cover art"""
 
     service = "romm"
-    size = (70, 70)
-    dest_path = os.path.join(settings.CACHE_DIR, "romm/icons")
+    size = (90, 120)
+    dest_path = os.path.join(settings.CACHE_DIR, "romm/coverart")
     file_patterns = ["%s.png"]
-    api_field = "icon"
+    api_field = "path_cover_small"
+
+    config_path = os.path.join(settings.CONFIG_DIR, "romm/config.json")
+    url_pattern = "%s"
+
+    def __init__(self):
+        super().__init__()
+
+        # Check the config file for the RomM host
+        if os.path.exists(self.config_path):
+            with open(self.config_path) as config_file:
+                config = json.load(config_file)
+                self.url_pattern = f"{config["host"]}%s"
 
 
-class RommSmallIcon(RommIcon):
-    size = (35, 35)
+class RommCoverartBig(RommCoverart):
+    """Romm big cover art"""
 
-
-class RommBigIcon(RommIcon):
-    size = (105, 105)
+    size = (264, 352)
+    dest_path = os.path.join(settings.CACHE_DIR, "romm/coverart_big")
+    api_field = "path_cover_big"
 
 
 class RommGame(ServiceGame):
@@ -64,8 +76,11 @@ class RommService(OnlineService):
     online = True
     drm_free = True
     runner = "libretro"
-    medias = {"small_icon": RommSmallIcon, "icon": RommIcon, "big_icon": RommBigIcon}
-    default_format = "icon"
+    medias = {
+        "coverart": RommCoverart,
+        "coverart_big": RommCoverartBig,
+    }
+    default_format = "coverart"
 
     cookies_path = os.path.join(settings.CACHE_DIR, "romm/cookies")
     cache_path = os.path.join(settings.CACHE_DIR, "romm/library/")

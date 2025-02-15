@@ -73,6 +73,8 @@ class WebConnectDialog(ModalDialog):
         # WARNING: For some reason this doesn't work as intended.
         # The inspector shows ups but it's impossible to interact with it
         # All inputs are blocked by the the webkit dialog.
+        # Workaround: Expand the window to desktop size and "Inspect Element",
+        # and it'll open at the bottom of the screen.
         inspector = self.webview.get_inspector()
         inspector.show()
 
