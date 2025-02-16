@@ -83,10 +83,12 @@ class BaseService:
 
     id = NotImplemented
     _matcher = None
+    _api_id = None
     has_extras = False
     name = NotImplemented
     description = ""
     icon = NotImplemented
+    runner = NotImplemented
     online = False
     local = False
     drm_free = False  # DRM free games can be added to Lutris from an existing install
@@ -101,6 +103,12 @@ class BaseService:
     def matcher(self):
         if self._matcher:
             return self._matcher
+        return self.id
+
+    @property
+    def api_id(self):
+        if self._api_id:
+            return self._api_id
         return self.id
 
     def run(self, launch_ui_delegate):
@@ -245,10 +253,10 @@ class BaseService:
     def match_games(self):
         """Matching of service games to lutris games"""
         service_games = {str(game["appid"]): game for game in ServiceGameCollection.get_for_service(self.id)}
-        lutris_games = api.get_api_games(list(service_games.keys()), service=self.id)
+        lutris_games = api.get_api_games(list(service_games.keys()), service=self.api_id)
         for lutris_game in lutris_games:
             for provider_game in lutris_game["provider_games"]:
-                if provider_game["service"] != self.id:
+                if provider_game["service"] != self.api_id:
                     continue
                 self.match_game(service_games.get(provider_game["slug"]), lutris_game)
         unmatched_service_games = get_games(searches={"installer_slug": self.matcher}, excludes={"service": self.id})
@@ -272,13 +280,15 @@ class BaseService:
 
     def get_installers_from_api(self, appid):
         """Query the lutris API for an appid and get existing installers for the service"""
-        lutris_games = api.get_api_games([appid], service=self.id)
+        lutris_games = api.get_api_games([appid], service=self.api_id)
         service_installers = []
         if lutris_games:
             lutris_game = lutris_games[0]
             installers = get_game_installers(lutris_game["slug"])
             for installer in installers:
                 if self.matcher in installer["version"].lower():
+                    service_installers.append(installer)
+                elif self.runner == installer["runner"]:
                     service_installers.append(installer)
         return service_installers
 

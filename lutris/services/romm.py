@@ -42,12 +42,12 @@ class RommCoverart(ServiceMedia):
                 self.url_pattern = f"{config["host"]}%s"
 
 
-class RommCoverartBig(RommCoverart):
+class RommCoverartLarge(RommCoverart):
     """Romm big cover art"""
 
     size = (264, 352)
-    dest_path = os.path.join(settings.CACHE_DIR, "romm/coverart_big")
-    api_field = "path_cover_big"
+    dest_path = os.path.join(settings.CACHE_DIR, "romm/coverart_large")
+    api_field = "path_cover_large"
 
 
 class RommGame(ServiceGame):
@@ -70,7 +70,8 @@ class RommService(OnlineService):
     """Service for Romm"""
 
     id = "romm"
-    _matcher = "romm"
+    _matcher = "igdb"
+    _api_id = "igdb"
     name = _("Romm")
     icon = "romm"
     online = True
@@ -78,7 +79,7 @@ class RommService(OnlineService):
     runner = "libretro"
     medias = {
         "coverart": RommCoverart,
-        "coverart_big": RommCoverartBig,
+        "coverart_large": RommCoverartLarge,
     }
     default_format = "coverart"
 
@@ -171,6 +172,8 @@ class RommService(OnlineService):
             seen.add(game["name"])
         for game in romm_games:
             game.save()
+
+        self.match_games()
         return romm_games
 
     def make_api_request(self, url):
@@ -189,11 +192,10 @@ class RommService(OnlineService):
         url = f"{self.api_url}/roms?order_by=name&order_dir=asc&limit=250"
         return self.make_api_request(url) or []
 
-    def get_installer_files(self, installer, installer_file_id, _selected_extras):
-        pass
+    def install(self, db_game):
+        """Install a RomM game"""
+        app_id = db_game["slug"]
+        logger.debug("Installing %s from service %s", app_id, self.id)
 
-    def generate_installer(self, db_game):
-        details = json.loads(db_game["details"])
-
-    def get_installed_runner_name(self, db_game):
-        return self.runner
+        # Install the game
+        self.install_from_api(db_game, app_id)
