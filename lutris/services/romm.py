@@ -201,9 +201,6 @@ class RommService(OnlineService):
         # Install the game
         self.install_from_api(db_game, app_id)
 
-    def add_installed_games(self):
-        pass
-
     def get_game_download_url(self, details) -> str:
         """Return the download URL for a game"""
         return f"{self.api_url}/roms/{details['id']}/content/{details['fs_name']}"
