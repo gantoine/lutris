@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 from gi.repository import Gtk
 
 from lutris import settings
+from lutris.database.services import ServiceGameCollection
 from lutris.exceptions import UnavailableGameError
 from lutris.gui.dialogs import InputDialog
 from lutris.installer import AUTO_ELF_EXE, AUTO_WIN32_EXE
@@ -166,10 +167,10 @@ class RommService(OnlineService):
         romm_games = []
         seen = set()
         for game in library:
-            if game["name"] in seen:
+            if game["id"] in seen:
                 continue
             romm_games.append(RommGame.new_from_romm(game))
-            seen.add(game["name"])
+            seen.add(game["id"])
         for game in romm_games:
             game.save()
 
@@ -199,3 +200,21 @@ class RommService(OnlineService):
 
         # Install the game
         self.install_from_api(db_game, app_id)
+
+    def add_installed_games(self):
+        pass
+
+    def get_game_download_url(self, details) -> str:
+        """Return the download URL for a game"""
+        return f"{self.api_url}/roms/{details['id']}/content/{details['fs_name']}"
+
+    def get_installer_files(self, installer, installer_file_id, extras):
+        service_game = ServiceGameCollection.get_game(self.id, installer.game_slug, "slug")
+        if not service_game:
+            logger.error("Aborting install, %s is not present in the game library.", installer.game_slug)
+            return
+
+        logger.debug("Installing %s", service_game["name"])
+        details = json.loads(service_game["details"])
+        file = InstallerFile(installer.game_slug, installer_file_id, {"url": self.get_game_download_url(details), "filename": details["fs_name"]})
+        return [file], []

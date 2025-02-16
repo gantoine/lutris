@@ -17,15 +17,15 @@ class ServiceGameCollection:
         return sql.filtered_query(settings.DB_PATH, "service_games", filters={"service": service})
 
     @classmethod
-    def get_game(cls, service, appid):
-        """Return a single game referred by its appid"""
+    def get_game(cls, service, value, field="appid"):
+        """Return a single"""
         if not service:
             raise ValueError("No service provided")
-        if not appid:
-            raise ValueError("No appid provided")
-        results = sql.filtered_query(settings.DB_PATH, "service_games", filters={"service": service, "appid": appid})
+        if not value:
+            raise ValueError("No value provided")
+        results = sql.filtered_query(settings.DB_PATH, "service_games", filters={"service": service, field: value})
         if not results:
             return
         if len(results) > 1:
-            logger.warning("More than one game found for %s on %s", appid, service)
+            logger.warning("More than one game found for %s %s on %s", field, value, service)
         return results[0]

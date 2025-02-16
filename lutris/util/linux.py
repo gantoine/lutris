@@ -197,6 +197,7 @@ class LinuxSystem:  # pylint: disable=too-many-public-methods
         if "armv7" in machine:
             return "armv7"
         logger.warning("Unsupported architecture %s", machine)
+        return "x86_64"
 
     @staticmethod
     def get_kernel_version():
