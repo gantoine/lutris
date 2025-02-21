@@ -40,7 +40,7 @@ class RommCoverart(ServiceMedia):
         if os.path.exists(self.config_path):
             with open(self.config_path) as config_file:
                 config = json.load(config_file)
-                self.url_pattern = f"{config["host"]}%s"
+                self.url_pattern = f"{config['host']}%s"
 
 
 class RommCoverartLarge(RommCoverart):
@@ -104,6 +104,9 @@ class RommService(OnlineService):
     @property
     def login_url(self):
         """Return the login URL"""
+        if not self.host_url:
+            return ""
+
         return self.host_url + "/login?next=/scan"
 
     @property

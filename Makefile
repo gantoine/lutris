@@ -2,8 +2,8 @@ VERSION=`grep "__version__" lutris/__init__.py | cut -d" " -f 3 | sed 's|"\(.*\)
 GITBRANCH ?= master
 # Default GPG key ID to use for package signing.
 PPA_GPG_KEY_ID ?= 82D96E430A1F1C0F0502747E37B90EDD4E3EFAE4
-PYTHON:=$(shell which python3)
-PIP:=$(PYTHON) -m pip
+PYTHON := $(shell which python3)
+PIP := $(PYTHON) -m pip
 
 all:
 	export GITBRANCH=master
@@ -90,11 +90,11 @@ snap:
 	snapcraft
 
 req-python:
-	pip3 install PyYAML lxml requests Pillow setproctitle python-magic distro dbus-python types-requests \
+	$(PIP) install PyYAML lxml requests Pillow setproctitle python-magic distro dbus-python types-requests \
 	 types-PyYAML evdev PyGObject pypresence protobuf moddb
 
 dev:
-	pip3 install ruff==0.3.5 mypy==1.8.0 mypy-baseline nose2
+	$(PIP) install ruff==0.3.5 mypy==1.8.0 mypy-baseline nose2
 
 # ============
 # Style checks
