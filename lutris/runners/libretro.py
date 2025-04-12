@@ -9,7 +9,7 @@ import requests
 
 from lutris import settings
 from lutris.config import LutrisConfig
-from lutris.exceptions import GameConfigError, MissingGameExecutableError, UnspecifiedVersionError
+from lutris.exceptions import GameConfigError, MissingBiosError, MissingGameExecutableError, UnspecifiedVersionError
 from lutris.runners.runner import Runner
 from lutris.util import system
 from lutris.util.libretro import RetroConfig
@@ -123,14 +123,11 @@ class libretro(Runner):
         return ""
 
     def get_core_path(self, core):
-        """Return the path of a core, prioritizing Retroarch cores"""
-        lutris_cores_folder = os.path.join(self.directory, "cores")
-        retroarch_core_folder = os.path.join(os.path.expanduser("~/.config/retroarch/cores"))
+        """Return the path of a core from libretro's runner only"""
+        lutris_cores_folder = get_default_config_path("cores")
         core_filename = "{}_libretro.so".format(core)
-        retroarch_core = os.path.join(retroarch_core_folder, core_filename)
-        if system.path_exists(retroarch_core):
-            return retroarch_core
-        return os.path.join(lutris_cores_folder, core_filename)
+        lutris_core = os.path.join(lutris_cores_folder, core_filename)
+        return lutris_core
 
     def get_version(self, use_default=True):
         return self.game_config["core"]
@@ -182,7 +179,7 @@ class libretro(Runner):
         """Return the system directory used for storing BIOS and firmwares."""
         system_directory = retro_config["system_directory"]
         if not system_directory or system_directory == "default":
-            system_directory = "~/.config/retroarch/system"
+            system_directory = get_default_config_path("system")
         return os.path.expanduser(system_directory)
 
     def prelaunch(self):
@@ -212,7 +209,7 @@ class libretro(Runner):
             retro_config["rgui_config_directory"] = get_default_config_path("config")
             retro_config["overlay_directory"] = get_default_config_path("overlay")
             retro_config["assets_directory"] = get_default_config_path("assets")
-            retro_config["system_directory"] = "~/.config/retroarch/system"
+            retro_config["system_directory"] = get_default_config_path("system")
             retro_config.save()
         else:
             retro_config = RetroConfig(config_file)
@@ -243,16 +240,20 @@ class libretro(Runner):
             # then rescan it in case the user added anything since the last time they changed it
             if firmware_count > 0:
                 lutris_config = LutrisConfig()
-                firmware_directory = lutris_config.raw_system_config["bios_path"]
+                firmware_directory = lutris_config.raw_system_config.get("bios_path")
+                if not firmware_directory:
+                    raise MissingBiosError(
+                        _("The emulator files BIOS location must be configured in the Preferences dialog.")
+                    )
                 scan_firmware_directory(firmware_directory)
 
             for index in range(firmware_count):
                 required_firmware_filename = retro_config["firmware%d_path" % index]
                 required_firmware_path = os.path.join(system_path, required_firmware_filename)
                 required_firmware_name = required_firmware_filename.split("/")[-1]
-                required_firmware_checksum = checksums[required_firmware_filename]
+                required_firmware_checksum = checksums.get(required_firmware_name)
                 if system.path_exists(required_firmware_path):
-                    if required_firmware_filename in checksums:
+                    if required_firmware_checksum:
                         checksum = system.get_md5_hash(required_firmware_path)
                         if checksum == required_firmware_checksum:
                             checksum_status = "Checksum good"
@@ -262,8 +263,9 @@ class libretro(Runner):
                         checksum_status = "No checksum info"
                     logger.info("Firmware '%s' found (%s)", required_firmware_filename, checksum_status)
                 else:
-                    get_firmware(required_firmware_name, required_firmware_checksum, system_path)
                     logger.warning("Firmware '%s' not found!", required_firmware_filename)
+                    if required_firmware_checksum:
+                        get_firmware(required_firmware_name, required_firmware_checksum, system_path)
 
     def get_runner_parameters(self):
         parameters = []

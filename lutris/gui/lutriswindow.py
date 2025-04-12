@@ -4,8 +4,9 @@
 # pylint: disable=no-member
 import os
 from collections import namedtuple
+from datetime import datetime
 from gettext import gettext as _
-from typing import Iterable, List
+from typing import Iterable, List, Set
 from urllib.parse import unquote, urlparse
 
 from gi.repository import Gdk, Gio, GLib, Gtk
@@ -33,6 +34,17 @@ from lutris.gui.dialogs import ClientLoginDialog, ErrorDialog, QuestionDialog, g
 from lutris.gui.dialogs.delegates import DialogInstallUIDelegate, DialogLaunchUIDelegate
 from lutris.gui.dialogs.game_import import ImportGameDialog
 from lutris.gui.download_queue import DownloadQueue
+from lutris.gui.views import (
+    COL_INSTALLED_AT,
+    COL_INSTALLED_AT_TEXT,
+    COL_LASTPLAYED,
+    COL_LASTPLAYED_TEXT,
+    COL_NAME,
+    COL_PLAYTIME,
+    COL_PLAYTIME_TEXT,
+    COL_SORTNAME,
+    COL_YEAR,
+)
 from lutris.gui.views.grid import GameGridView
 from lutris.gui.views.list import GameListView
 from lutris.gui.views.store import GameStore
@@ -94,7 +106,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
             default_height=height,
             window_position=Gtk.WindowPosition.NONE,
             name="lutris",
-            icon_name="lutris",
+            icon_name="net.lutris.Lutris",
             application=application,
             **kwargs,
         )
@@ -126,9 +138,6 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         self.accelerators = Gtk.AccelGroup()
         self.add_accel_group(self.accelerators)
 
-        key, mod = Gtk.accelerator_parse("F5")
-        self.accelerators.connect(key, mod, Gtk.AccelFlags.VISIBLE, self.on_refresh)
-
         self.connect("delete-event", self.on_window_delete)
         self.connect("configure-event", self.on_window_configure)
         self.connect("realize", self.on_load)
@@ -155,7 +164,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
 
         self.set_viewtype_icon(self.current_view_type)
 
-        lutris_icon = Gtk.Image.new_from_icon_name("lutris", Gtk.IconSize.MENU)
+        lutris_icon = Gtk.Image.new_from_icon_name("net.lutris.Lutris", Gtk.IconSize.MENU)
         lutris_icon.set_margin_right(3)
 
         self.sidebar = LutrisSidebar(self.application)
@@ -423,6 +432,21 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         """True if the view sorting options will be effective; dynamic categories ignore them."""
         return self.filters.get("dynamic_category") not in self.dynamic_categories_game_factories
 
+    def get_sort_sensitive_columns(self) -> Set[int]:
+        if self.is_view_sort_sensitive:
+            if self.view_sorting == "name":
+                return set([COL_NAME, COL_SORTNAME])
+            elif self.view_sorting == "year":
+                return set([COL_YEAR])
+            elif self.view_sorting == "lastplayed":
+                return set([COL_LASTPLAYED, COL_LASTPLAYED_TEXT])
+            elif self.view_sorting == "installed_at":
+                return set([COL_INSTALLED_AT, COL_INSTALLED_AT_TEXT])
+            elif self.view_sorting == "playtime":
+                return set([COL_PLAYTIME, COL_PLAYTIME_TEXT])
+
+        return set()
+
     def apply_view_sort(self, items, resolver=lambda i: i):
         """This sorts a list of items according to the view settings of this window;
         the items can be anything, but you can provide a lambda that provides a
@@ -442,36 +466,71 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
             "playtime": 0.0,
         }
 
+        def get_sort_default(item):
+            """Returns the default value to use when the value is missing; we may be able
+            to extract this from the item.."""
+            if self.view_sorting == "year" and self.service:
+                service_year = self.service.get_game_release_date(item)
+                service_year = convert_value(service_year)
+                if service_year:
+                    return service_year
+
+            # Users may have obsolete view_sorting settings, so
+            # we must tolerate them. We treat them all as blank.
+            return sort_defaults.get(self.view_sorting, "")
+
+        def convert_value(value):
+            """Converts 'value' to the type required for the sort that is in use. Returns None if this
+            can't be managed."""
+            try:
+                if not value:
+                    return None
+                if self.view_sorting == "name":
+                    return str(value)
+                if self.view_sorting == "year":
+                    # Years can take many forms! We'll try to convert as best we can.
+                    if isinstance(value, datetime):
+                        return int(value.year)
+                    else:
+                        try:
+                            return int(value)
+                        except ValueError:
+                            as_date = datetime.strptime(str(value), "%Y-%m-%d")
+                            return int(as_date.year)
+                else:
+                    return float(value)
+            except ValueError:
+                return None  # unable to parse value?
+
+        def extend_value(value):
+            """Expands the value to sort by to a more complex form, for smarter sorting."""
+            if self.view_sorting == "name":
+                return get_natural_sort_key(value)
+            if self.view_sorting == "year":
+                contains_year = bool(value)
+                if self.view_reverse_order:
+                    contains_year = not contains_year
+                return contains_year, value
+            return value
+
         def get_sort_value(item):
             db_game = resolver(item)
             if not db_game:
                 installation_flag = False
-                value = sort_defaults.get(self.view_sorting, "")
+                value = None
             else:
                 installation_flag = bool(db_game.get("installed"))
 
                 # When sorting by name, check for a valid sortname first, then fall back
                 # on name if valid sortname is not available.
-                sortname = db_game.get("sortname")
-                if self.view_sorting == "name" and sortname:
-                    value = sortname
+                if self.view_sorting == "name":
+                    value = db_game.get("sortname") or db_game.get("name")
                 else:
                     value = db_game.get(self.view_sorting)
 
-                if self.view_sorting == "name":
-                    value = get_natural_sort_key(value)
-            # Users may have obsolete view_sorting settings, so
-            # we must tolerate them. We treat them all as blank.
-            value = value or sort_defaults.get(self.view_sorting, "")
-            if self.view_sorting == "year":
-                if self.service:
-                    service_value = self.service.get_game_release_date(item)
-                    if service_value:
-                        value = service_value
-                contains_year = bool(value)
-                if self.view_reverse_order:
-                    contains_year = not contains_year
-                value = [contains_year, value]
+            value = convert_value(value) or get_sort_default(item)
+            value = extend_value(value)
+
             if self.view_sorting_installed_first:
                 # We want installed games to always be first, even in
                 # a descending sort.
@@ -479,7 +538,7 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
                     installation_flag = not installation_flag
                 if self.view_sorting == "name":
                     installation_flag = not installation_flag
-                return [installation_flag, value]
+                return installation_flag, value
             return value
 
         reverse = self.view_reverse_order if self.view_sorting == "name" else not self.view_reverse_order
@@ -753,13 +812,19 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
                 view.service = self.service
 
             GLib.idle_add(self.update_revealer)
-            self.game_store = game_store
 
-            view_type = self.current_view_type
+            if self.game_store != game_store:
+                self.game_store = game_store
 
-            if view_type in self.views:
-                self.current_view = self.views[view_type]
-                self.current_view.set_game_store(self.game_store)
+                view_type = self.current_view_type
+
+                if view_type in self.views:
+                    view = self.views[view_type]
+                    self.current_view = view
+                    selected_ids = [view.get_game_id_for_path(p) for p in view.get_selected()]
+                    view.set_game_store(self.game_store)
+                    new_selection = [view.get_path_for_game_id(game_id) for game_id in selected_ids]
+                    view.set_selected(filter(None, new_selection), scroll_into_view=True)
 
             if games:
                 self.hide_overlay()
@@ -1197,10 +1262,6 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
         settings.write_setting("side_panel_visible", bool(side_panel_visible))
         self.sidebar_revealer.set_reveal_child(side_panel_visible)
 
-    def on_refresh(self, _accel_group, _window, _keyval, _modifier):
-        """Handle F5 key, which updates the view explicitly."""
-        self.refresh_view()
-
     def on_sidebar_changed(self, widget):
         """Handler called when the selected element of the sidebar changes"""
         for filter_type in ("category", "dynamic_category", "saved_search", "service", "runner", "platform"):
@@ -1302,8 +1363,9 @@ class LutrisWindow(Gtk.ApplicationWindow, DialogLaunchUIDelegate, DialogInstallU
                 return True
 
         if db_game:
-            updated = self.game_store.update(db_game)
-            if not updated:
+            updated_columns = self.game_store.update(db_game)
+            sensitive_columns = self.get_sort_sensitive_columns()
+            if updated_columns is None or not sensitive_columns.isdisjoint(updated_columns):
                 self.update_store()
 
         return True
